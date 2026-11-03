@@ -1,4 +1,5 @@
 # BioViewer 3D
+**Live demo:** https://bio-viewer-3d.vercel.app
 
 A lightweight, modular protein viewer in the browser. TypeScript + Vite + Three.js.
 
