@@ -1,3 +1,5 @@
+export type SS = 'H' | 'E' | 'C';
+
 export interface Atom {
   x: number; y: number; z: number;
   element: string; name: string; resName: string;
@@ -37,5 +39,25 @@ export class PdbParser {
       });
     }
     return atoms;
+  }
+
+  /** Hélices (H) y hojas (E) declaradas en los registros HELIX/SHEET; clave 'cadena|residuo'. */
+  static parseSecondary(text: string): Map<string, SS> {
+    const m = new Map<string, SS>();
+    for (const line of text.split(/\r?\n/)) {
+      if (line.startsWith('ATOM')) break;
+      let ss: SS | null = null;
+      let c1 = '', c2 = '', s1 = NaN, s2 = NaN;
+      if (line.startsWith('HELIX')) {
+        ss = 'H'; c1 = line.charAt(19); s1 = parseInt(line.substring(21, 25), 10);
+        c2 = line.charAt(31); s2 = parseInt(line.substring(33, 37), 10);
+      } else if (line.startsWith('SHEET')) {
+        ss = 'E'; c1 = line.charAt(21); s1 = parseInt(line.substring(22, 26), 10);
+        c2 = line.charAt(32); s2 = parseInt(line.substring(33, 37), 10);
+      }
+      if (!ss || c1 !== c2 || Number.isNaN(s1) || Number.isNaN(s2)) continue;
+      for (let r = s1; r <= s2; r++) m.set(`${c1.trim() || 'A'}|${r}`, ss);
+    }
+    return m;
   }
 }

@@ -150,4 +150,4 @@ export class Ribbon {
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();
   }
-}
+} 
