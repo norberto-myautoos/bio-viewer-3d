@@ -142,7 +142,8 @@ function init(): void {
     predicted = src.predicted;
     const atoms = PdbParser.parse(src.text);
     if (atoms.length === 0) throw new Error(t('noAtoms'));
-    renderer.load(atoms, modeSelect.value as ColorMode, predicted);
+    renderer.load(atoms, modeSelect.value as ColorMode, predicted, PdbParser.parseSecondary(src.text));
+    renderer.setRibbonVisible($<HTMLInputElement>('show-ribbon').checked);
     renderer.setAtomsVisible($<HTMLInputElement>('show-atoms').checked);
     renderer.setBackboneVisible($<HTMLInputElement>('show-backbone').checked);
     manager.fitToRadius(renderer.radius);
@@ -188,6 +189,7 @@ function init(): void {
   modeSelect.addEventListener('change', () => { if (loaded) renderer.recolor(modeSelect.value as ColorMode, predicted); });
   $<HTMLInputElement>('show-atoms').addEventListener('change', (e) => renderer.setAtomsVisible((e.target as HTMLInputElement).checked));
   $<HTMLInputElement>('show-backbone').addEventListener('change', (e) => renderer.setBackboneVisible((e.target as HTMLInputElement).checked));
+  $<HTMLInputElement>('show-ribbon').addEventListener('change', (e) => renderer.setRibbonVisible((e.target as HTMLInputElement).checked));
 
   langSelect.value = initLang();
   refreshLabels();

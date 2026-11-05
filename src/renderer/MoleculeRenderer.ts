@@ -1,13 +1,15 @@
 import * as THREE from 'three';
-import type { Atom } from '../parser/PdbParser';
+import type { Atom, SS } from '../parser/PdbParser';
+import { Ribbon } from './RibbonBuilder';
 
-export type ColorMode = 'confidence' | 'element' | 'residue' | 'chain';
+export type ColorMode = 'confidence' | 'element' | 'residue' | 'chain' | 'ss';
 
 const ELEMENT_COLORS: Record<string, number> = {
   C: 0x909090, N: 0x3050f8, O: 0xff0d0d, S: 0xffff30, H: 0xffffff, P: 0xffa500,
 };
 const RADII: Record<string, number> = { H: 0.25, C: 0.4, N: 0.38, O: 0.37, S: 0.5, P: 0.5 };
 const CHAIN_PALETTE = [0x38bdf8, 0xf472b6, 0xa3e635, 0xfbbf24, 0xa78bfa, 0xfb923c, 0x2dd4bf, 0xf87171];
+const SS_COLORS: Record<SS, number> = { H: 0xe5484d, E: 0xf5c542, C: 0x9ca3af };
 
 function plddtColor(v: number): number {
   if (v > 90) return 0x0053d6;
@@ -28,10 +30,12 @@ export class MoleculeRenderer {
   private group = new THREE.Group();
   private atomMesh: THREE.InstancedMesh | null = null;
   private backbone = new THREE.Group();
+  private ribbon: Ribbon | null = null;
   private atoms: Atom[] = [];
   private chainIndex = new Map<string, number>();
   private bMin = 0;
   private bMax = 1;
+  private ribbonVisible = true;
   /** Radio de la esfera que contiene la estructura (ya centrada en el origen). */
   radius = 10;
 
@@ -40,7 +44,7 @@ export class MoleculeRenderer {
     scene.add(this.group);
   }
 
-  load(atoms: Atom[], mode: ColorMode, predicted: boolean): void {
+  load(atoms: Atom[], mode: ColorMode, predicted: boolean, sec: Map<string, SS> = new Map()): void {
     this.clear();
     this.atoms = atoms;
     if (atoms.length === 0) return;
@@ -74,34 +78,44 @@ export class MoleculeRenderer {
     this.group.add(mesh);
     this.radius = Math.sqrt(r2) + 2;
 
-    this.recolor(mode, predicted);
     this.buildBackbone();
+    this.ribbon = new Ribbon(atoms, sec);
+    this.ribbon.mesh.visible = this.ribbonVisible;
+    this.group.add(this.ribbon.mesh);
+    this.recolor(mode, predicted);
   }
 
-  /** Cambia el color sin reconstruir geometría. */
+  private colorOf(mode: ColorMode, predicted: boolean, a: Atom, ss: SS): number {
+    switch (mode) {
+      case 'confidence': {
+        if (predicted) return plddtColor(a.bFactor);
+        const span = this.bMax - this.bMin || 1;
+        return new THREE.Color().setHSL(0.66 * (1 - (a.bFactor - this.bMin) / span), 0.9, 0.5).getHex();
+      }
+      case 'element': return ELEMENT_COLORS[a.element] ?? 0xffc0cb;
+      case 'residue': return residueColor(a.resName);
+      case 'chain': return CHAIN_PALETTE[(this.chainIndex.get(a.chain) ?? 0) % CHAIN_PALETTE.length];
+      case 'ss': return SS_COLORS[ss];
+    }
+  }
+
+  /** Cambia el color sin reconstruir geometría (átomos y cinta). */
   recolor(mode: ColorMode, predicted: boolean): void {
     if (!this.atomMesh) return;
     const color = new THREE.Color();
-    const span = this.bMax - this.bMin || 1;
     this.atoms.forEach((a, i) => {
-      switch (mode) {
-        case 'confidence':
-          if (predicted) color.setHex(plddtColor(a.bFactor));
-          else color.setHSL(0.66 * (1 - (a.bFactor - this.bMin) / span), 0.9, 0.5);
-          break;
-        case 'element': color.setHex(ELEMENT_COLORS[a.element] ?? 0xffc0cb); break;
-        case 'residue': color.setHex(residueColor(a.resName)); break;
-        case 'chain': color.setHex(CHAIN_PALETTE[(this.chainIndex.get(a.chain) ?? 0) % CHAIN_PALETTE.length]); break;
-      }
-      this.atomMesh!.setColorAt(i, color);
+      const ss = this.ribbon?.ssByResidue.get(`${a.chain}|${a.resSeq}`) ?? 'C';
+      this.atomMesh!.setColorAt(i, color.setHex(this.colorOf(mode, predicted, a, ss)));
     });
     if (this.atomMesh.instanceColor) this.atomMesh.instanceColor.needsUpdate = true;
+    this.ribbon?.paint((a, ss) => this.colorOf(mode === 'element' ? 'ss' : mode, predicted, a, ss));
   }
 
   setAtomsVisible(v: boolean): void { if (this.atomMesh) this.atomMesh.visible = v; }
   setBackboneVisible(v: boolean): void { this.backbone.visible = v; }
+  setRibbonVisible(v: boolean): void { this.ribbonVisible = v; if (this.ribbon) this.ribbon.mesh.visible = v; }
 
-  /** Un tubo por segmento continuo de CA, separado por cadena (no une cadenas ni huecos). */
+  /** Tubo delgado por segmento continuo de CA (esqueleto). */
   private buildBackbone(): void {
     const chains = new Map<string, Atom[]>();
     for (const a of this.atoms) {
@@ -138,6 +152,11 @@ export class MoleculeRenderer {
       (this.atomMesh.material as THREE.Material).dispose();
       this.atomMesh.dispose();
       this.atomMesh = null;
+    }
+    if (this.ribbon) {
+      this.group.remove(this.ribbon.mesh);
+      this.ribbon.dispose();
+      this.ribbon = null;
     }
     const mats = new Set<THREE.Material>();
     for (const child of [...this.backbone.children]) {
