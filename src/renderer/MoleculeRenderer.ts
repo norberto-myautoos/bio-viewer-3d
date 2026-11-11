@@ -36,6 +36,7 @@ export class MoleculeRenderer {
   private bMin = 0;
   private bMax = 1;
   private ribbonVisible = true;
+  private ray = new THREE.Raycaster();
   /** Radio de la esfera que contiene la estructura (ya centrada en el origen). */
   radius = 10;
 
@@ -114,6 +115,29 @@ export class MoleculeRenderer {
   setAtomsVisible(v: boolean): void { if (this.atomMesh) this.atomMesh.visible = v; }
   setBackboneVisible(v: boolean): void { this.backbone.visible = v; }
   setRibbonVisible(v: boolean): void { this.ribbonVisible = v; if (this.ribbon) this.ribbon.mesh.visible = v; }
+
+  /** Átomo o residuo bajo el puntero (esferas visibles o cinta visible). */
+  pick(ev: PointerEvent, dom: HTMLElement, cam: THREE.Camera): { atom: Atom; ss: SS } | null {
+    const r = dom.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+    this.ray.setFromCamera(ndc, cam);
+    let best: { d: number; atom: Atom; ss: SS } | null = null;
+    if (this.atomMesh && this.atomMesh.visible) {
+      const hit = this.ray.intersectObject(this.atomMesh)[0];
+      if (hit && hit.instanceId !== undefined) {
+        const a = this.atoms[hit.instanceId];
+        best = { d: hit.distance, atom: a, ss: this.ribbon?.ssByResidue.get(`${a.chain}|${a.resSeq}`) ?? 'C' };
+      }
+    }
+    if (this.ribbon && this.ribbon.mesh.visible) {
+      const hit = this.ray.intersectObject(this.ribbon.mesh)[0];
+      if (hit && hit.face && (!best || hit.distance < best.d)) {
+        const ring = this.ribbon.pick(hit.face.a);
+        if (ring) best = { d: hit.distance, atom: ring.atom, ss: ring.ss };
+      }
+    }
+    return best ? { atom: best.atom, ss: best.ss } : null;
+  }
 
   /** Tubo delgado por segmento continuo de CA (esqueleto). */
   private buildBackbone(): void {
