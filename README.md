@@ -41,3 +41,4 @@ This is a viewer. It does not run docking, molecular dynamics or any prediction.
 - AlphaFold Protein Structure Database (EMBL-EBI / Google DeepMind), data under CC BY 4.0. Please cite Jumper et al., Nature (2021) and Fleming et al., J Mol Biol (2025).
 - UniProt and RCSB PDB for names, genes, organisms, functions and experimental structures. Check each provider's terms before commercial use.
 - Machine translation of function texts via MyMemory (free service with daily limits).
+
