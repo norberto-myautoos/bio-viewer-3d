@@ -136,6 +136,11 @@ export class Ribbon {
     this.mesh.frustumCulled = false;
   }
 
+  /** Residuo asociado a un vértice de la malla (para selección con clic). */
+  pick(vertex: number): { atom: Atom; ss: SS } | null {
+    return this.rings[Math.floor(vertex / M)] ?? null;
+  }
+
   paint(fn: (a: Atom, ss: SS) => number): void {
     const col = this.mesh.geometry.getAttribute('color') as THREE.BufferAttribute;
     const c = new THREE.Color();
