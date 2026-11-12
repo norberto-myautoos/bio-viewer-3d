@@ -83,3 +83,4 @@ export class SceneManager {
     this.renderer.dispose();
   }
 }
+
