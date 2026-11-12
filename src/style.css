@@ -1,0 +1,37 @@
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f19;
+  font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: #e5e7eb; }
+#canvas-container { width: 100vw; height: 100vh; }
+#ui-overlay { position: absolute; top: 12px; left: 12px; z-index: 10; width: 290px;
+  max-height: calc(100vh - 24px); overflow-y: auto;
+  background: rgba(15, 23, 42, 0.9); padding: 12px 14px; border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1); font-size: 0.8rem; }
+#ui-overlay h1 { font-size: 0.95rem; margin: 0 0 4px; color: #38bdf8; }
+#ui-overlay p { margin: 0 0 8px; color: #9ca3af; }
+#ui-overlay label { display: block; margin: 6px 0; }
+#ui-overlay .row { display: flex; gap: 6px; margin-bottom: 6px; }
+#id-input { flex: 1; min-width: 0; padding: 4px 6px; }
+#ui-overlay select { width: 100%; margin-top: 3px; }
+#ui-overlay .stats { margin-top: 8px; color: #9ca3af; }
+#info-card { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.12); }
+#info-card:empty { display: none; }
+#info-card p { margin: 0 0 6px; color: #d1d5db; line-height: 1.35; }
+#info-card b { color: #38bdf8; }
+#credits { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.68rem; line-height: 1.35; color: #9ca3af; }
+#credits a { color: #38bdf8; }
+#ui-overlay { overflow-x: hidden; }
+#pdb-file-input { max-width: 100%; }
+#ui-overlay { backdrop-filter: blur(10px); }
+#load-btn, #export-btn, .preset { background: rgba(56,189,248,.15); border: 1px solid rgba(56,189,248,.4); color: #e0f2fe; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: .75rem; }
+#load-btn:hover, #export-btn:hover, .preset:hover { background: rgba(56,189,248,.3); }
+#export-btn { width: 100%; margin-top: 10px; }
+.presets { align-items: center; flex-wrap: wrap; gap: 4px; color: #9ca3af; }
+#legend { margin-top: 10px; font-size: .72rem; color: #9ca3af; }
+.chip { display: inline-block; padding: 1px 6px; margin: 3px 4px 0 0; border-radius: 4px; font-weight: 600; }
+.gradbar { height: 8px; margin-top: 4px; border-radius: 4px; background: linear-gradient(to right, hsl(240,90%,50%), hsl(0,90%,50%)); }
+#atom-tooltip { position: absolute; right: 20px; bottom: 20px; width: 230px; z-index: 20; background: rgba(15,23,42,.92); backdrop-filter: blur(10px); border: 1px solid #38bdf8; border-radius: 10px; padding: 12px; font-size: .78rem; }
+#atom-tooltip.hidden { display: none; }
+.tt-head { display: flex; justify-content: space-between; align-items: center; color: #38bdf8; margin-bottom: 6px; }
+#tt-close { background: none; border: none; color: #9ca3af; font-size: 1.1rem; cursor: pointer; }
+#tt-body p { margin: 0 0 4px; color: #d1d5db; }
+#tt-body b { color: #38bdf8; }
