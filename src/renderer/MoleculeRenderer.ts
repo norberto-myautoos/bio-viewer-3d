@@ -37,6 +37,7 @@ export class MoleculeRenderer {
   private bMax = 1;
   private ribbonVisible = true;
   private ray = new THREE.Raycaster();
+  private marks = new THREE.Group();
   /** Radio de la esfera que contiene la estructura (ya centrada en el origen). */
   radius = 10;
   /** true si la estructura secundaria se estimó por geometría (el archivo no la trae). */
@@ -44,6 +45,7 @@ export class MoleculeRenderer {
 
   constructor(scene: THREE.Scene) {
     this.group.add(this.backbone);
+    this.group.add(this.marks);
     scene.add(this.group);
   }
 
@@ -172,7 +174,33 @@ export class MoleculeRenderer {
     }
   }
 
+  /** Resalta residuos (rangos de numeración UniProt) con esferas de color; [] quita el resaltado. */
+  highlight(items: { start: number; end: number; color: number }[]): void {
+    this.clearMarks();
+    for (const it of items) {
+      for (const a of this.atoms) {
+        if (a.name !== 'CA' || a.isHet || a.resSeq < it.start || a.resSeq > it.end) continue;
+        const m = new THREE.Mesh(
+          new THREE.SphereGeometry(1.1, 16, 12),
+          new THREE.MeshStandardMaterial({ color: it.color, emissive: it.color, emissiveIntensity: 0.6, transparent: true, opacity: 0.85 }),
+        );
+        m.position.set(a.x, a.y, a.z);
+        this.marks.add(m);
+      }
+    }
+  }
+
+  private clearMarks(): void {
+    for (const c of [...this.marks.children]) {
+      const m = c as THREE.Mesh;
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+      this.marks.remove(c);
+    }
+  }
+
   private clear(): void {
+    this.clearMarks();
     if (this.atomMesh) {
       this.group.remove(this.atomMesh);
       this.atomMesh.geometry.dispose();

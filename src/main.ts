@@ -11,7 +11,8 @@ const isOn = (id: string, fallback: boolean): boolean =>
 
 interface AfMeta { uniprotDescription?: string; gene?: string; organismScientificName?: string }
 interface Source { text: string; name: string; predicted: boolean; kind: 'pdb' | 'alphafold' | 'file'; id: string; meta?: AfMeta }
-interface RawInfo { name?: string; gene?: string; org?: string; method?: string; fn?: string }
+interface Site { kind: 'binding' | 'active' | 'variant'; start: number; end: number; label: string }
+interface RawInfo { name?: string; gene?: string; org?: string; method?: string; fn?: string; diseases?: { name: string; text?: string }[]; sites?: Site[] }
 type Item = [label: string, text: string];
 
 async function getText(url: string): Promise<string> {
@@ -52,6 +53,34 @@ async function fetchInfo(src: Source): Promise<RawInfo> {
       const fn = u.comments?.find((c: { commentType: string }) => c.commentType === 'FUNCTION');
       const text: string | undefined = fn?.texts?.[0]?.value;
       if (text) info.fn = text.length > 380 ? text.slice(0, 380) + '…' : text;
+      info.diseases = (u.comments ?? [])
+        .filter((c: { commentType: string }) => c.commentType === 'DISEASE')
+        .map((c: { disease?: { diseaseId?: string; description?: string } }) => ({ name: c.disease?.diseaseId ?? '', text: c.disease?.description }))
+        .filter((d: { name: string }) => d.name)
+        .slice(0, 6);
+      const kinds: Record<string, Site['kind']> = { 'Binding site': 'binding', 'Active site': 'active', 'Natural variant': 'variant' };
+      type Feat = { type: string; location?: { start?: { value?: number }; end?: { value?: number } }; description?: string; ligand?: { name?: string }; alternativeSequence?: { originalSequence?: string; alternativeSequences?: string[] } };
+      const sites: Site[] = [];
+      let nv = 0, ns = 0;
+      for (const f of (u.features ?? []) as Feat[]) {
+        const kind = kinds[f.type];
+        const s = f.location?.start?.value;
+        const e = f.location?.end?.value;
+        if (!kind || s === undefined || e === undefined) continue;
+        if (kind === 'variant') {
+          if (nv >= 12 || !f.description || /dbSNP/i.test(f.description)) continue;
+          nv++;
+        } else {
+          if (ns >= 12) continue;
+          ns++;
+        }
+        const alt = f.alternativeSequence;
+        const label = kind === 'variant'
+          ? `${alt?.originalSequence ?? '?'}${s}${alt?.alternativeSequences?.[0] ?? '?'}: ${f.description}`
+          : `${f.ligand?.name ?? f.description ?? f.type} (${s}${e !== s ? '–' + e : ''})`;
+        sites.push({ kind, start: s, end: e, label });
+      }
+      info.sites = sites;
     } catch { /* la función es opcional */ }
   }
   return info;
@@ -125,6 +154,7 @@ function init(): void {
     if (!cur) return;
     const myId = ++renderId;
     const { src, atoms, info } = cur;
+    renderEdu(info);
     const head: Item[] = [];
     if (info.name) head.push([t('l_name'), info.name]);
     if (info.gene) head.push([t('l_gene'), info.gene]);
@@ -153,6 +183,7 @@ function init(): void {
     $('stat-chains').textContent = String(new Set(atoms.map((a) => a.chain)).size);
     loaded = true;
     curName = src.name.replace(/[^A-Za-z0-9_-]+/g, '_');
+    if (src.kind !== 'file') history.replaceState(null, '', `?id=${encodeURIComponent(src.id)}`);
     document.getElementById('atom-tooltip')?.classList.add('hidden');
     setStatus(() => t('showing', { n: src.name }));
     updateLegend();
@@ -253,10 +284,55 @@ function init(): void {
   }));
   document.getElementById('export-btn')?.addEventListener('click', () => manager.exportPNG(`${curName}_BioViewer3D.png`, 2));
 
+  const renderEdu = (info: RawInfo) => {
+    const box = document.getElementById('edu');
+    if (!box) return;
+    box.replaceChildren();
+    renderer.highlight([]);
+    const dis = info.diseases ?? [];
+    const sites = info.sites ?? [];
+    if (dis.length) {
+      const p = document.createElement('p');
+      const b = document.createElement('b');
+      b.textContent = `${t('eduDis')}: `;
+      p.append(b, dis.map((d) => d.name).join('; '));
+      box.appendChild(p);
+    }
+    if (sites.length) {
+      const h = document.createElement('div');
+      h.className = 'edu-title';
+      h.textContent = t('eduSites');
+      box.appendChild(h);
+      const colors = { binding: 0x22d3ee, active: 0xf43f5e, variant: 0xfacc15 } as const;
+      for (const s of sites) {
+        const b = document.createElement('button');
+        b.className = `chip-btn ${s.kind}`;
+        b.textContent = s.label.length > 46 ? `${s.label.slice(0, 46)}…` : s.label;
+        b.title = s.label;
+        b.addEventListener('click', () => renderer.highlight([{ start: s.start, end: s.end, color: colors[s.kind] }]));
+        box.appendChild(b);
+      }
+      const clear = document.createElement('button');
+      clear.className = 'chip-btn';
+      clear.textContent = t('eduClear');
+      clear.addEventListener('click', () => renderer.highlight([]));
+      box.appendChild(clear);
+    }
+  };
+
+  document.getElementById('copy-btn')?.addEventListener('click', () => {
+    const prev = statusFn;
+    void navigator.clipboard?.writeText(location.href).then(() => {
+      setStatus(() => t('copied'));
+      setTimeout(() => setStatus(prev), 1800);
+    }).catch(() => undefined);
+  });
+
   langSelect.value = initLang();
   refreshLabels();
   manager.start((fps) => { $('stat-fps').textContent = String(fps); });
-  void run(() => fetchById('1UBQ'));
+  const q = new URLSearchParams(location.search).get('id') ?? '';
+  void run(() => fetchById(/^[A-Za-z0-9]{4,10}$/.test(q) ? q : '1UBQ'));
 }
 
 init();

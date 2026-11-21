@@ -36,3 +36,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f19;
 #tt-body p { margin: 0 0 4px; color: #d1d5db; }
 #tt-body b { color: #38bdf8; }
 .disclaimer { margin-top: 6px; font-style: italic; }
+#copy-btn { width: 100%; margin-top: 6px; background: rgba(56,189,248,.15); border: 1px solid rgba(56,189,248,.4); color: #e0f2fe; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: .75rem; }
+#edu { margin-top: 10px; font-size: .78rem; }
+#edu p { margin: 0 0 4px; color: #d1d5db; }
+#edu b { color: #38bdf8; }
+.edu-title { margin-top: 8px; color: #9ca3af; font-size: .72rem; }
+.chip-btn { display: inline-block; margin: 3px 4px 0 0; padding: 2px 7px; border-radius: 6px; font-size: .68rem; cursor: pointer; background: rgba(255,255,255,.06); color: #e5e7eb; border: 1px solid rgba(255,255,255,.2); }
+.chip-btn.binding { border-color: #22d3ee; } .chip-btn.active { border-color: #f43f5e; } .chip-btn.variant { border-color: #facc15; }

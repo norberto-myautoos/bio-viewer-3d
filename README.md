@@ -10,6 +10,7 @@ A lightweight, modular protein viewer in the browser. TypeScript + Vite + Three.
 - Ribbon (cartoon) with helices, sheets with arrowheads and coils, built from C-alpha splines oriented by carbonyl oxygens. Secondary structure comes from HELIX/SHEET records when present; otherwise it is estimated from C-alpha geometry (approximate, not full DSSP).
 - Backbone trace of C-alpha atoms, split per chain and at chain breaks. Water and alternate conformations are ignored.
 - Live FPS counter (measured, not hard-coded).
+- Shareable links (`?id=P69905`) and an education panel from UniProt (associated diseases, binding/active sites, natural variants) with click-to-highlight in 3D.
 - Info card with name, gene, organism and function (RCSB, AlphaFold DB, UniProt) plus a summary computed from the loaded file.
 - UI in Spanish, English, Portuguese and French; the UniProt function text is machine-translated (MyMemory) with an English fallback.
 
