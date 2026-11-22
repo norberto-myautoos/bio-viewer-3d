@@ -1,0 +1,381 @@
+import { SceneManager } from './core/SceneManager';
+import { PdbParser, type Atom } from './parser/PdbParser';
+import { MoleculeRenderer, type ColorMode } from './renderer/MoleculeRenderer';
+import { t, applyStatic, initLang, setLang, getLang, type Lang } from './i18n';
+import './style.css';
+
+const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+/** Estado de una casilla; si el elemento no existe devuelve el valor por defecto (no rompe la app). */
+const isOn = (id: string, fallback: boolean): boolean =>
+  (document.getElementById(id) as HTMLInputElement | null)?.checked ?? fallback;
+
+interface AfMeta { uniprotDescription?: string; gene?: string; organismScientificName?: string; latestVersion?: number; modelCreatedDate?: string }
+interface Source { text: string; name: string; predicted: boolean; kind: 'pdb' | 'alphafold' | 'file'; id: string; meta?: AfMeta; provider?: string; license?: string; version?: string; date?: string }
+interface Site { kind: 'binding' | 'active' | 'variant'; start: number; end: number; label: string }
+interface RawInfo { name?: string; gene?: string; org?: string; method?: string; fn?: string; diseases?: { name: string; text?: string }[]; sites?: Site[] }
+type Item = [label: string, text: string];
+
+const today = (): string => new Date().toISOString().slice(0, 10);
+
+async function getText(url: string): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} en ${url}`);
+  return res.text();
+}
+
+/** 4 caracteres (1UBQ) -> RCSB PDB; otro formato (P69905) -> AlphaFold DB por UniProt. */
+async function fetchById(raw: string): Promise<Source> {
+  const id = raw.trim().split(/\s+/)[0].toUpperCase();
+  if (/^[0-9][A-Z0-9]{3}$/.test(id)) {
+    const text = await getText(`https://files.rcsb.org/download/${id}.pdb`);
+    return { text, name: id, predicted: false, kind: 'pdb', id, provider: 'RCSB PDB', license: 'CC0 1.0', date: today() };
+  }
+  const meta = JSON.parse(await getText(`https://alphafold.ebi.ac.uk/api/prediction/${id}`));
+  const entry = Array.isArray(meta) ? meta[0] : meta;
+  if (!entry?.pdbUrl) throw new Error(t('noAf'));
+  const text = await getText(entry.pdbUrl);
+  const m = entry as AfMeta;
+  return {
+    text, name: `AlphaFold ${id}`, predicted: true, kind: 'alphafold', id, meta: m,
+    provider: 'AlphaFold Protein Structure Database', license: 'CC BY 4.0',
+    version: m.latestVersion ? String(m.latestVersion) : '', date: today(),
+  };
+}
+
+/** Datos oficiales de RCSB, AlphaFold DB y UniProt (en inglés). */
+async function fetchInfo(src: Source): Promise<RawInfo> {
+  const info: RawInfo = {};
+  if (src.kind === 'pdb') {
+    const d = JSON.parse(await getText(`https://data.rcsb.org/rest/v1/core/entry/${src.id}`));
+    info.name = d.struct?.title;
+    const method = d.exptl?.[0]?.method;
+    const res = d.rcsb_entry_info?.resolution_combined?.[0];
+    if (method) info.method = res ? `${method} (${res} Å)` : method;
+  } else if (src.kind === 'alphafold') {
+    info.name = src.meta?.uniprotDescription;
+    info.gene = src.meta?.gene;
+    info.org = src.meta?.organismScientificName;
+    try {
+      const u = JSON.parse(await getText(`https://rest.uniprot.org/uniprotkb/${src.id}.json`));
+      const fn = u.comments?.find((c: { commentType: string }) => c.commentType === 'FUNCTION');
+      const text: string | undefined = fn?.texts?.[0]?.value;
+      if (text) info.fn = text.length > 380 ? text.slice(0, 380) + '…' : text;
+      info.diseases = (u.comments ?? [])
+        .filter((c: { commentType: string }) => c.commentType === 'DISEASE')
+        .map((c: { disease?: { diseaseId?: string; description?: string } }) => ({ name: c.disease?.diseaseId ?? '', text: c.disease?.description }))
+        .filter((d: { name: string }) => d.name)
+        .slice(0, 6);
+      const kinds: Record<string, Site['kind']> = { 'Binding site': 'binding', 'Active site': 'active', 'Natural variant': 'variant' };
+      type Feat = { type: string; location?: { start?: { value?: number }; end?: { value?: number } }; description?: string; ligand?: { name?: string }; alternativeSequence?: { originalSequence?: string; alternativeSequences?: string[] } };
+      const sites: Site[] = [];
+      let nv = 0, ns = 0;
+      for (const f of (u.features ?? []) as Feat[]) {
+        const kind = kinds[f.type];
+        const s = f.location?.start?.value;
+        const e = f.location?.end?.value;
+        if (!kind || s === undefined || e === undefined) continue;
+        if (kind === 'variant') {
+          if (nv >= 12 || !f.description || /dbSNP/i.test(f.description)) continue;
+          nv++;
+        } else {
+          if (ns >= 12) continue;
+          ns++;
+        }
+        const alt = f.alternativeSequence;
+        const o = alt?.originalSequence;
+        const na = alt?.alternativeSequences?.[0];
+        const label = kind === 'variant'
+          ? (o && na && o.length === 1 && na.length === 1
+            ? `${o}${s}${na}: ${f.description}`
+            : `${s}${e !== s ? '–' + e : ''}: ${f.description}`)
+          : `${f.ligand?.name ?? f.description ?? f.type} (${s}${e !== s ? '–' + e : ''})`;
+        sites.push({ kind, start: s, end: e, label });
+      }
+      info.sites = sites;
+    } catch { /* la función es opcional */ }
+  }
+  return info;
+}
+
+/** Traducción automática gratuita (MyMemory). Devuelve null si falla; entonces se muestra el inglés. */
+const trCache = new Map<string, string>();
+async function translate(text: string, lang: Lang): Promise<string | null> {
+  if (lang === 'en') return text;
+  const key = `${lang}|${text}`;
+  const hit = trCache.get(key);
+  if (hit) return hit;
+  try {
+    const d = JSON.parse(await getText(
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${lang}`));
+    const out: string | undefined = d.responseData?.translatedText;
+    if (!out || Number(d.responseStatus) !== 200) return null;
+    trCache.set(key, out);
+    return out;
+  } catch { return null; }
+}
+
+/** Resumen calculado con los datos reales del archivo. */
+function summarize(atoms: Atom[], src: Source): Item[] {
+  const cas = atoms.filter((a) => a.name === 'CA' && !a.isHet);
+  const ch = new Set(atoms.map((a) => a.chain)).size;
+  const counts = t('counts', { aa: cas.length, ch, at: atoms.length });
+  if (!src.predicted || cas.length === 0) {
+    return [[t('l_sum'), (src.kind === 'pdb' ? `${t('exp')} ` : '') + counts]];
+  }
+  const mean = cas.reduce((s, a) => s + a.bFactor, 0) / cas.length;
+  const g = Math.round((100 * cas.filter((a) => a.bFactor > 70).length) / cas.length);
+  const lv = t(mean > 90 ? 'lv1' : mean > 70 ? 'lv2' : mean > 50 ? 'lv3' : 'lv4');
+  return [
+    [t('l_sum'), `${t('pred')} ${counts}`],
+    [t('l_conf'), t('confTxt', { m: mean.toFixed(0), lv, g })],
+  ];
+}
+
+function renderCard(items: Item[], card: HTMLElement = $('info-card')): void {
+  card.replaceChildren();
+  for (const [label, text] of items) {
+    const p = document.createElement('p');
+    const b = document.createElement('b');
+    b.textContent = `${label}: `;
+    p.append(b, text);
+    card.appendChild(p);
+  }
+}
+
+function init(): void {
+  const status = $('status');
+  const modeSelect = $<HTMLSelectElement>('color-mode');
+  const langSelect = $<HTMLSelectElement>('lang-select');
+  const manager = new SceneManager('canvas-container');
+  const renderer = new MoleculeRenderer(manager.scene);
+  let predicted = false;
+  let loaded = false;
+  let renderId = 0;
+  let cur: { src: Source; atoms: Atom[]; info: RawInfo } | null = null;
+  let statusFn: () => string = () => t('loading');
+
+  const setStatus = (fn: () => string) => { statusFn = fn; status.textContent = fn(); };
+  const refreshLabels = () => {
+    applyStatic();
+    $('conf-option').textContent = t(predicted ? 'conf_pl' : 'conf_b');
+    status.textContent = statusFn();
+  };
+
+  const renderInfo = async () => {
+    if (!cur) return;
+    const myId = ++renderId;
+    const { src, atoms, info } = cur;
+    renderEdu(info, src);
+    const head: Item[] = [];
+    if (info.name) head.push([t('l_name'), info.name]);
+    if (info.gene) head.push([t('l_gene'), info.gene]);
+    if (info.org) head.push([t('l_org'), info.org]);
+    if (info.method) head.push([t('l_method'), info.method]);
+    const tail = summarize(atoms, src);
+    tail.push([t('l_prov'), src.kind === 'file' ? t('provLocal') : [src.provider, src.id, src.version ? `v${src.version}` : '', src.date, src.license].filter(Boolean).join(' · ')]);
+    renderCard([...head, ...tail]);
+    if (!info.fn) return;
+    const lang = getLang();
+    const tr = isOn('use-tr', false) ? await translate(info.fn, lang) : null;
+    if (myId !== renderId) return;
+    const origin = t(lang === 'en' ? 'fnSrc' : tr ? 'fnTr' : 'fnEn');
+    renderCard([...head, [`${t('l_fn')} (${origin})`, tr ?? info.fn], ...tail]);
+  };
+
+  const show = (src: Source) => {
+    predicted = src.predicted;
+    const atoms = PdbParser.parse(src.text);
+    if (atoms.length === 0) throw new Error(t('noAtoms'));
+    renderer.load(atoms, modeSelect.value as ColorMode, predicted, PdbParser.parseSecondary(src.text));
+    renderer.setRibbonVisible(isOn('show-ribbon', true));
+    renderer.setAtomsVisible(isOn('show-atoms', false));
+    renderer.setBackboneVisible(isOn('show-backbone', false));
+    manager.fitToRadius(renderer.radius);
+    $('stat-atoms').textContent = atoms.length.toLocaleString();
+    $('stat-chains').textContent = String(new Set(atoms.map((a) => a.chain)).size);
+    loaded = true;
+    curName = src.name.replace(/[^A-Za-z0-9_-]+/g, '_');
+    if (src.kind !== 'file') history.replaceState(null, '', `?id=${encodeURIComponent(src.id)}`);
+    document.getElementById('atom-tooltip')?.classList.add('hidden');
+    setStatus(() => t('showing', { n: src.name }));
+    updateLegend();
+    refreshLabels();
+
+    const mine = { src, atoms, info: {} as RawInfo };
+    cur = mine;
+    void renderInfo();
+    fetchInfo(src)
+      .then((info) => { if (cur === mine) { mine.info = info; void renderInfo(); } })
+      .catch(() => { /* sin red: se queda el resumen local */ });
+  };
+
+  const run = async (task: () => Promise<Source>) => {
+    setStatus(() => t('loading'));
+    try { show(await task()); }
+    catch (e) { const m = (e as Error).message; setStatus(() => t('error', { m })); console.error(e); }
+  };
+
+  langSelect.addEventListener('change', () => {
+    setLang(langSelect.value as Lang);
+    refreshLabels();
+    updateLegend();
+    void renderInfo();
+  });
+  $('load-btn').addEventListener('click', () => {
+    const id = $<HTMLInputElement>('id-input').value;
+    if (id.trim()) void run(() => fetchById(id));
+  });
+  $('id-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('load-btn').click(); });
+  $<HTMLInputElement>('pdb-file-input').addEventListener('change', (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (file) {
+      void run(async () => ({
+        text: await file.text(), name: file.name, kind: 'file' as const, id: file.name,
+        predicted: /^AF-/i.test(file.name),
+      }));
+    }
+  });
+  modeSelect.addEventListener('change', () => { if (loaded) renderer.recolor(modeSelect.value as ColorMode, predicted); updateLegend(); });
+  document.getElementById('show-atoms')?.addEventListener('change', (e) => renderer.setAtomsVisible((e.target as HTMLInputElement).checked));
+  document.getElementById('show-backbone')?.addEventListener('change', (e) => renderer.setBackboneVisible((e.target as HTMLInputElement).checked));
+  document.getElementById('show-ribbon')?.addEventListener('change', (e) => renderer.setRibbonVisible((e.target as HTMLInputElement).checked));
+
+  // --- Leyenda, inspección por clic, ejemplos y exportación ---
+  let curName = 'bioviewer';
+  const chip = (bg: string, text: string, fg = '#000') => {
+    const s = document.createElement('span');
+    s.className = 'chip'; s.style.background = bg; s.style.color = fg; s.textContent = text;
+    return s;
+  };
+  const updateLegend = () => {
+    const box = document.getElementById('legend');
+    if (!box) return;
+    box.replaceChildren();
+    const mode = modeSelect.value;
+    const title = document.createElement('div');
+    if (mode === 'confidence' && predicted) {
+      title.textContent = t('legPl');
+      box.append(title, chip('#0053d6', '>90', '#fff'), chip('#65cbf3', '70–90'), chip('#ffdb13', '50–70'), chip('#ff7d45', '<50'));
+    } else if (mode === 'confidence') {
+      title.textContent = t('legB');
+      const bar = document.createElement('div');
+      bar.className = 'gradbar';
+      box.append(title, bar);
+    } else if (mode === 'ss' || mode === 'element') {
+      title.textContent = t('legSS') + (renderer.ssEstimated ? ` ${t('est')}` : '');
+      box.append(title, chip('#e5484d', t('ssH'), '#fff'), chip('#f5c542', t('ssE')), chip('#9ca3af', t('ssC')));
+    }
+  };
+
+  const tip = document.getElementById('atom-tooltip');
+  document.getElementById('tt-close')?.addEventListener('click', () => tip?.classList.add('hidden'));
+  const dom = manager.renderer.domElement;
+  let down: [number, number] | null = null;
+  dom.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
+  dom.addEventListener('pointerup', (e) => {
+    if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return; // fue un arrastre
+    const hit = renderer.pick(e, dom, manager.camera);
+    if (!tip) return;
+    if (!hit) { tip.classList.add('hidden'); return; }
+    const a = hit.atom;
+    $('tt-title').textContent = `${a.resName} ${a.resSeq}`;
+    renderCard([
+      [t('tAtom'), `${a.name} (${a.element})`],
+      [t('tChain'), a.chain],
+      [t(predicted ? 'tConf' : 'tB'), a.bFactor.toFixed(1)],
+      [t('tSS'), t(hit.ss === 'H' ? 'ssH' : hit.ss === 'E' ? 'ssE' : 'ssC')],
+    ], $('tt-body'));
+    tip.classList.remove('hidden');
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('.preset').forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.id ?? '';
+    const input = document.getElementById('id-input') as HTMLInputElement | null;
+    if (input) input.value = id;
+    void run(() => fetchById(id));
+  }));
+  document.getElementById('export-btn')?.addEventListener('click', () => manager.exportPNG(`${curName}_BioViewer3D.png`, 2));
+
+  const renderEdu = (info: RawInfo, src: Source) => {
+    const box = document.getElementById('edu');
+    if (!box) return;
+    box.replaceChildren();
+    renderer.highlight([]);
+    const dis = info.diseases ?? [];
+    const sites = info.sites ?? [];
+    if (dis.length) {
+      const p = document.createElement('p');
+      const b = document.createElement('b');
+      b.textContent = `${t('eduDis')}: `;
+      p.append(b, dis.map((d) => d.name).join('; '));
+      box.appendChild(p);
+    }
+    if (sites.length) {
+      const h = document.createElement('div');
+      h.className = 'edu-title';
+      h.textContent = t('eduSites');
+      box.appendChild(h);
+      const colors = { binding: 0x22d3ee, active: 0xf43f5e, variant: 0xfacc15 } as const;
+      for (const s of sites) {
+        const b = document.createElement('button');
+        b.className = `chip-btn ${s.kind}`;
+        b.textContent = s.label.length > 46 ? `${s.label.slice(0, 46)}…` : s.label;
+        b.title = s.label;
+        b.addEventListener('click', () => renderer.highlight([{ start: s.start, end: s.end, color: colors[s.kind] }]));
+        box.appendChild(b);
+      }
+      const clear = document.createElement('button');
+      clear.className = 'chip-btn';
+      clear.textContent = t('eduClear');
+      clear.addEventListener('click', () => renderer.highlight([]));
+      box.appendChild(clear);
+    }
+    if (dis.length || sites.length) {
+      const n = document.createElement('div');
+      n.className = 'edu-title';
+      n.textContent = `${t('eduSrc')}: UniProtKB ${src.id}`;
+      box.appendChild(n);
+    }
+  };
+
+  const srcModal = document.getElementById('sources-modal');
+  document.getElementById('src-btn')?.addEventListener('click', () => {
+    const body = document.getElementById('src-body');
+    if (body) {
+      renderCard([
+        ['AlphaFold Protein Structure Database (EMBL-EBI)', 'CC BY 4.0. Jumper et al., Nature (2021); Fleming et al., J Mol Biol (2025).'],
+        ['RCSB PDB / wwPDB', 'CC0 1.0.'],
+        ['UniProt', 'CC BY 4.0.'],
+        [t('srcIndep'), t('srcIndepTxt')],
+        [t('srcData'), t('srcDataTxt')],
+        [t('srcPred'), t('srcPredTxt')],
+        [t('srcUpd'), t('srcUpdTxt')],
+      ], body);
+    }
+    srcModal?.classList.remove('hidden');
+  });
+  document.getElementById('src-close')?.addEventListener('click', () => srcModal?.classList.add('hidden'));
+  srcModal?.addEventListener('click', (e) => { if (e.target === srcModal) srcModal.classList.add('hidden'); });
+  document.getElementById('use-tr')?.addEventListener('change', () => { void renderInfo(); });
+
+  document.getElementById('copy-btn')?.addEventListener('click', () => {
+    const prev = statusFn;
+    void navigator.clipboard?.writeText(location.href).then(() => {
+      setStatus(() => t('copied'));
+      setTimeout(() => setStatus(prev), 1800);
+    }).catch(() => undefined);
+  });
+
+  // Estado inicial fijo de las casillas (evita que el navegador restaure valores anteriores)
+  for (const [id, on] of [['show-ribbon', true], ['show-atoms', false], ['show-backbone', false], ['use-tr', false]] as const) {
+    const el = document.getElementById(id) as HTMLInputElement | null;
+    if (el) el.checked = on;
+  }
+  langSelect.value = initLang();
+  refreshLabels();
+  manager.start((fps) => { $('stat-fps').textContent = String(fps); });
+  const q = new URLSearchParams(location.search).get('id') ?? '';
+  void run(() => fetchById(/^[A-Za-z0-9]{4,10}$/.test(q) ? q : '1UBQ'));
+}
+
+init();
