@@ -82,8 +82,12 @@ async function fetchInfo(src: Source): Promise<RawInfo> {
           ns++;
         }
         const alt = f.alternativeSequence;
+        const o = alt?.originalSequence;
+        const na = alt?.alternativeSequences?.[0];
         const label = kind === 'variant'
-          ? `${alt?.originalSequence ?? '?'}${s}${alt?.alternativeSequences?.[0] ?? '?'}: ${f.description}`
+          ? (o && na && o.length === 1 && na.length === 1
+            ? `${o}${s}${na}: ${f.description}`
+            : `${s}${e !== s ? '–' + e : ''}: ${f.description}`)
           : `${f.ligand?.name ?? f.description ?? f.type} (${s}${e !== s ? '–' + e : ''})`;
         sites.push({ kind, start: s, end: e, label });
       }
@@ -362,6 +366,11 @@ function init(): void {
     }).catch(() => undefined);
   });
 
+  // Estado inicial fijo de las casillas (evita que el navegador restaure valores anteriores)
+  for (const [id, on] of [['show-ribbon', true], ['show-atoms', false], ['show-backbone', false], ['use-tr', false]] as const) {
+    const el = document.getElementById(id) as HTMLInputElement | null;
+    if (el) el.checked = on;
+  }
   langSelect.value = initLang();
   refreshLabels();
   manager.start((fps) => { $('stat-fps').textContent = String(fps); });
