@@ -1,4 +1,4 @@
- html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f19;
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f19;
   font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: #e5e7eb; }
 #canvas-container { width: 100vw; height: 100vh; }
 #ui-overlay { position: absolute; top: 12px; left: 12px; z-index: 10; width: 290px;
@@ -49,4 +49,9 @@
 #src-body p { margin: 0 0 8px; color: #d1d5db; line-height: 1.4; }
 #src-body b { color: #38bdf8; }
 #src-close { background: none; border: none; color: #9ca3af; font-size: 1.2rem; cursor: pointer; }
-.linkbtn { background: none; border: none; color: #38bdf8; text-decoration: underline; cursor: pointer; padding: 0; margin-top: 6px; font-size: .68rem; }padding: 0; margin-top: 6px; font-size: .68rem; }
+.linkbtn { background: none; border: none; color: #38bdf8; text-decoration: underline; cursor: pointer; padding: 0; margin-top: 6px; font-size: .68rem; }
+<<<<<<< HEAD
+.chip-btn.variant.dis { border-color: #f97316; background: rgba(249,115,22,.14); }
+=======
+.chip-btn.variant.dis { border-color: #f97316; background: rgba(249,115,22,.14); }
+>>>>>>> e4b39bbed2043d6fbc778dd9d5d846f4e9e52223

@@ -11,11 +11,16 @@ const isOn = (id: string, fallback: boolean): boolean =>
 
 interface AfMeta { uniprotDescription?: string; gene?: string; organismScientificName?: string; latestVersion?: number; modelCreatedDate?: string }
 interface Source { text: string; name: string; predicted: boolean; kind: 'pdb' | 'alphafold' | 'file'; id: string; meta?: AfMeta; provider?: string; license?: string; version?: string; date?: string }
-interface Site { kind: 'binding' | 'active' | 'variant'; start: number; end: number; label: string }
+interface Site { kind: 'binding' | 'active' | 'variant'; start: number; end: number; label: string; disease?: boolean }
 interface RawInfo { name?: string; gene?: string; org?: string; method?: string; fn?: string; diseases?: { name: string; text?: string }[]; sites?: Site[] }
 type Item = [label: string, text: string];
 
 const today = (): string => new Date().toISOString().slice(0, 10);
+
+/** Clasificación aproximada: ¿la descripción de la variante sugiere una enfermedad? */
+const isDisease = (d: string): boolean =>
+  /\bin [A-Z][A-Z0-9]+(?![A-Za-z0-9-])/.test(d) ||
+  /thalass|an(a)?emia|disease|syndrome|cardiomyopathy|deficien|dystroph|carcinoma|cancer|neuropath|retinitis|sickle/i.test(d);
 
 async function getText(url: string): Promise<string> {
   const res = await fetch(url);
@@ -68,7 +73,7 @@ async function fetchInfo(src: Source): Promise<RawInfo> {
       const kinds: Record<string, Site['kind']> = { 'Binding site': 'binding', 'Active site': 'active', 'Natural variant': 'variant' };
       type Feat = { type: string; location?: { start?: { value?: number }; end?: { value?: number } }; description?: string; ligand?: { name?: string }; alternativeSequence?: { originalSequence?: string; alternativeSequences?: string[] } };
       const sites: Site[] = [];
-      let nv = 0, ns = 0;
+      let ns = 0;
       for (const f of (u.features ?? []) as Feat[]) {
         const kind = kinds[f.type];
         const s = f.location?.start?.value;
@@ -78,8 +83,7 @@ async function fetchInfo(src: Source): Promise<RawInfo> {
         if (kind === 'variant') {
           // quita solo la referencia a dbSNP; conserva el resto (p. ej. la enfermedad)
           desc = desc.replace(/;?\s*dbSNP:rs\d+/gi, '').replace(/^[;\s]+|[;\s]+$/g, '');
-          if (nv >= 15 || !desc) continue;
-          nv++;
+          if (!desc) continue;
         } else {
           if (ns >= 12) continue;
           ns++;
@@ -92,9 +96,10 @@ async function fetchInfo(src: Source): Promise<RawInfo> {
             ? `${o}${s}${na}: ${desc}`
             : `${s}${e !== s ? '–' + e : ''}: ${desc}`)
           : `${f.ligand?.name ?? f.description ?? f.type} (${s}${e !== s ? '–' + e : ''})`;
-        sites.push({ kind, start: s, end: e, label });
+        sites.push({ kind, start: s, end: e, label, disease: kind === 'variant' && isDisease(desc) });
       }
-      info.sites = sites;
+      const vs = sites.filter((x) => x.kind === 'variant').sort((a, b) => Number(!!b.disease) - Number(!!a.disease)).slice(0, 60);
+      info.sites = [...sites.filter((x) => x.kind !== 'variant'), ...vs];
     } catch { /* la función es opcional */ }
   }
   return info;
@@ -299,11 +304,11 @@ function init(): void {
   }));
   document.getElementById('export-btn')?.addEventListener('click', () => manager.exportPNG(`${curName}_BioViewer3D.png`, 2));
 
-  const renderEdu = (info: RawInfo, src: Source) => {
+  const renderEdu = (info: RawInfo, src: Source, limit = 8, keep = false) => {
     const box = document.getElementById('edu');
     if (!box) return;
     box.replaceChildren();
-    renderer.highlight([]);
+    if (!keep) renderer.highlight([]);
     const dis = info.diseases ?? [];
     const sites = info.sites ?? [];
     if (dis.length) {
@@ -319,19 +324,34 @@ function init(): void {
       h.textContent = t('eduSites');
       box.appendChild(h);
       const colors = { binding: 0x22d3ee, active: 0xf43f5e, variant: 0xfacc15 } as const;
-      for (const s of sites) {
+      const vars = sites.filter((s) => s.kind === 'variant');
+      const shown = [...sites.filter((s) => s.kind !== 'variant'), ...vars.slice(0, limit)];
+      for (const s of shown) {
         const b = document.createElement('button');
-        b.className = `chip-btn ${s.kind}`;
+        b.className = `chip-btn ${s.kind}${s.disease ? ' dis' : ''}`;
         b.textContent = s.label.length > 46 ? `${s.label.slice(0, 46)}…` : s.label;
         b.title = s.label;
         b.addEventListener('click', () => renderer.highlight([{ start: s.start, end: s.end, color: colors[s.kind] }]));
         box.appendChild(b);
+      }
+      if (vars.length > limit) {
+        const more = document.createElement('button');
+        more.className = 'chip-btn';
+        more.textContent = `${t('eduMore')} (${vars.length - limit})`;
+        more.addEventListener('click', () => renderEdu(info, src, limit + 12, true));
+        box.appendChild(more);
       }
       const clear = document.createElement('button');
       clear.className = 'chip-btn';
       clear.textContent = t('eduClear');
       clear.addEventListener('click', () => renderer.highlight([]));
       box.appendChild(clear);
+      if (vars.some((v) => v.disease)) {
+        const l = document.createElement('div');
+        l.className = 'edu-title';
+        l.textContent = t('eduLeg');
+        box.appendChild(l);
+      }
     }
     if (dis.length || sites.length) {
       const n = document.createElement('div');
@@ -347,26 +367,6 @@ function init(): void {
       box.appendChild(n);
     }
   };
-
-  const srcModal = document.getElementById('sources-modal');
-  document.getElementById('src-btn')?.addEventListener('click', () => {
-    const body = document.getElementById('src-body');
-    if (body) {
-      renderCard([
-        ['AlphaFold Protein Structure Database (EMBL-EBI)', 'CC BY 4.0. Jumper et al., Nature (2021); Fleming et al., J Mol Biol (2025).'],
-        ['RCSB PDB / wwPDB', 'CC0 1.0.'],
-        ['UniProt', 'CC BY 4.0.'],
-        [t('srcIndep'), t('srcIndepTxt')],
-        [t('srcData'), t('srcDataTxt')],
-        [t('srcPred'), t('srcPredTxt')],
-        [t('srcUpd'), t('srcUpdTxt')],
-      ], body);
-    }
-    srcModal?.classList.remove('hidden');
-  });
-  document.getElementById('src-close')?.addEventListener('click', () => srcModal?.classList.add('hidden'));
-  srcModal?.addEventListener('click', (e) => { if (e.target === srcModal) srcModal.classList.add('hidden'); });
-  document.getElementById('use-tr')?.addEventListener('change', () => { void renderInfo(); });
 
   document.getElementById('copy-btn')?.addEventListener('click', () => {
     const prev = statusFn;
