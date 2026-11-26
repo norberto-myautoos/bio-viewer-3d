@@ -304,11 +304,11 @@ function init(): void {
   }));
   document.getElementById('export-btn')?.addEventListener('click', () => manager.exportPNG(`${curName}_BioViewer3D.png`, 2));
 
-  const renderEdu = (info: RawInfo, src: Source, limit = 8, keep = false) => {
+  const renderEdu = (info: RawInfo, src: Source) => {
     const box = document.getElementById('edu');
     if (!box) return;
     box.replaceChildren();
-    if (!keep) renderer.highlight([]);
+    renderer.highlight([]);
     const dis = info.diseases ?? [];
     const sites = info.sites ?? [];
     if (dis.length) {
@@ -324,22 +324,25 @@ function init(): void {
       h.textContent = t('eduSites');
       box.appendChild(h);
       const colors = { binding: 0x22d3ee, active: 0xf43f5e, variant: 0xfacc15 } as const;
-      const vars = sites.filter((s) => s.kind === 'variant');
-      const shown = [...sites.filter((s) => s.kind !== 'variant'), ...vars.slice(0, limit)];
-      for (const s of shown) {
+      const mk = (s: Site): HTMLButtonElement => {
         const b = document.createElement('button');
         b.className = `chip-btn ${s.kind}${s.disease ? ' dis' : ''}`;
         b.textContent = s.label.length > 46 ? `${s.label.slice(0, 46)}…` : s.label;
         b.title = s.label;
         b.addEventListener('click', () => renderer.highlight([{ start: s.start, end: s.end, color: colors[s.kind] }]));
-        box.appendChild(b);
-      }
-      if (vars.length > limit) {
-        const more = document.createElement('button');
-        more.className = 'chip-btn';
-        more.textContent = `${t('eduMore')} (${vars.length - limit})`;
-        more.addEventListener('click', () => renderEdu(info, src, limit + 12, true));
-        box.appendChild(more);
+        return b;
+      };
+      for (const s of sites.filter((x) => x.kind !== 'variant')) box.appendChild(mk(s));
+      const vars = sites.filter((x) => x.kind === 'variant');
+      if (vars.length) {
+        // Las variantes van en una caja con altura máxima y desplazamiento propio
+        const vbox = document.createElement('div');
+        Object.assign(vbox.style, {
+          maxHeight: '190px', overflowY: 'auto', marginTop: '6px', padding: '4px',
+          border: '1px solid rgba(255,255,255,.12)', borderRadius: '8px',
+        });
+        for (const s of vars) vbox.appendChild(mk(s));
+        box.appendChild(vbox);
       }
       const clear = document.createElement('button');
       clear.className = 'chip-btn';
