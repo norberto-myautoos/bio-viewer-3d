@@ -19,7 +19,7 @@ const today = (): string => new Date().toISOString().slice(0, 10);
 
 /** Clasificación aproximada: ¿la descripción de la variante sugiere una enfermedad? */
 const isDisease = (d: string): boolean =>
-  /\bin [A-Z][A-Z0-9]+(?![A-Za-z0-9-])/.test(d) ||
+  /\bin [A-Z][A-Z0-9-]*[A-Z0-9](?![A-Za-z0-9])/.test(d) ||
   /thalass|an(a)?emia|disease|syndrome|cardiomyopathy|deficien|dystroph|carcinoma|cancer|neuropath|retinitis|sickle/i.test(d);
 
 async function getText(url: string): Promise<string> {
