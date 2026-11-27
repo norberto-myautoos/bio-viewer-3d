@@ -371,6 +371,26 @@ function init(): void {
     }
   };
 
+  const srcModal = document.getElementById('sources-modal');
+  document.getElementById('src-btn')?.addEventListener('click', () => {
+    const body = document.getElementById('src-body');
+    if (body) {
+      renderCard([
+        ['AlphaFold Protein Structure Database (EMBL-EBI)', 'CC BY 4.0. Jumper et al., Nature (2021); Fleming et al., J Mol Biol (2025).'],
+        ['RCSB PDB / wwPDB', 'CC0 1.0.'],
+        ['UniProt', 'CC BY 4.0.'],
+        [t('srcIndep'), t('srcIndepTxt')],
+        [t('srcData'), t('srcDataTxt')],
+        [t('srcPred'), t('srcPredTxt')],
+        [t('srcUpd'), t('srcUpdTxt')],
+      ], body);
+    }
+    srcModal?.classList.remove('hidden');
+  });
+  document.getElementById('src-close')?.addEventListener('click', () => srcModal?.classList.add('hidden'));
+  srcModal?.addEventListener('click', (e) => { if (e.target === srcModal) srcModal.classList.add('hidden'); });
+  document.getElementById('use-tr')?.addEventListener('change', () => { void renderInfo(); });
+
   document.getElementById('copy-btn')?.addEventListener('click', () => {
     const prev = statusFn;
     void navigator.clipboard?.writeText(location.href).then(() => {
